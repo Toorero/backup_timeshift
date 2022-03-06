@@ -30,5 +30,4 @@ The following figure shows an example layout:
 ## TODOs
 
 - [ ] dry-run option
-- [ ] no-deletion at `<DEST>` option
 - [ ] small description if `--help`

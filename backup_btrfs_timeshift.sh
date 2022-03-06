@@ -23,7 +23,7 @@ case $i in
         echo "-v,--verbose                      Enables verbose output"
         echo "-vb,--vbrtfs                      Enables verbose output for btrfs send/receive"
         echo "--force-mount                     Forces script to mount <DEST> first"
-        echo "--no-delete                       Does not sync deletion of snapshot at origin"
+        echo "--no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>"
         echo "-q,--quiet                        Supresses output to a minimum"
         #echo "--dry-run                         Will only simulate backup process without altering any files" # WIP
         exit 0
@@ -130,20 +130,17 @@ function backup() {
 }
 
 function sync_subv_deletion() {
-    [ ! $DELETE ] && return 0
-
     subv=$1
 
-    log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups..."
+    [ $DELETE ] && log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups..."
+    ! [ $DELETE ] && logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only..."
     for subdir in "$ROOT/../readonly/"*
     do
         if snapshot_deleted "$subdir" && [ -d "$subdir/$subv" ]
         then
             logv "  Deleting $(basename $subdir)..."
             btrfs subvolume delete "$subdir/$subv"
-            #rmdir --ignore-fail-on-non-empty $subdir
-            btrfs subvolume delete "$SYNC_DEST/snapshots/$(basename $subdir)/$subv"
-            #rmdir --ignore-fail-on-non-empty "$SYNC_DEST/snapshots/$(basename $subdir)"
+            [ $DELETE ] && btrfs subvolume delete "$SYNC_DEST/snapshots/$(basename $subdir)/$subv"
         fi
     done
 }
