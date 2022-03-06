@@ -18,7 +18,7 @@ The following figure shows an example layout:
     └── @home
 ```
 
-## Workings
+## Implementation
 
 1. If `--force-mount` option was set execute `mount <DEST>` (See `man fstab` on how to configure mount for this behaviour)
 2. Search for all possible `@*` folders at **second** level.
