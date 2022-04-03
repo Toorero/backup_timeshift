@@ -25,6 +25,7 @@ case $i in
         echo "--force-mount                     Forces script to mount <DEST> first"
         echo "--no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>"
         echo "-q,--quiet                        Supresses output to a minimum"
+        echo "--subvol=@<subv>                  Only backups the specified subvolume"
         #echo "--dry-run                         Will only simulate backup process without altering any files" # WIP
         exit 0
         shift
@@ -63,6 +64,10 @@ case $i in
         ;;
     --debug)
         DEBUG=true
+        shift
+        ;;
+    --subvol=@*)
+        subv="${i#*=}"
         shift
         ;;
     *)
@@ -118,7 +123,7 @@ function backup_incremental() {
     [ $DEBUG ] && set -x
     btrfs $(logvv "-v") send -p "$1" "$2" | btrfs $(logvv "-v") receive "$3"
     [ $DEBUG ] && set +x
-    CRITICAL=
+    unset CRITICAL
 }
 
 function backup() {
@@ -126,11 +131,11 @@ function backup() {
     [ $DEBUG ] && set -x
     btrfs $(logvv "-v") send "$1" | btrfs $(logvv "-v") receive "$2"
     [ $DEBUG ] && set +x
-    CRITICAL=
+    unset CRITICAL
 }
 
 function sync_subv_deletion() {
-    subv=$1
+    local subdir
 
     [ $DELETE ] && log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups..."
     ! [ $DELETE ] && logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only..."
@@ -146,7 +151,8 @@ function sync_subv_deletion() {
 }
 
 function sync_subv() {
-    subv=$1
+    local subdir
+    local past_subdir
 
     log "$(tput bold)${subv}$(tput sgr0) Syncing timeshift backups..."
 
@@ -160,7 +166,7 @@ function sync_subv() {
             continue
         fi
 
-        readonly_subdir="$ROOT/../readonly/$(basename $subdir)"
+        local readonly_subdir="$ROOT/../readonly/$(basename $subdir)"
         if [ -d "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" ] && [ -d "$readonly_subdir/$subv" ]
         then
             logv "  Skipping already synced snapshot '$(basename $subdir)'"
@@ -175,10 +181,10 @@ function sync_subv() {
         else
             logv "  Creating readonly snapshot of '$(basename $subdir)'"
             mkdir -p "$readonly_subdir"
-            
+
             CRITICAL="$readonly_subdir/$subv"
             btrfs subvolume snapshot -r "$subdir/$subv" "$readonly_subdir/$subv"
-            CRITICAL=
+            unset CRITICAL
         fi
 
         # if readonly is synced
@@ -203,6 +209,7 @@ function sync_subv() {
 }
 
 function cleanup() {
+    local subdir
     log "Cleaning up left over directorys..."
 
     for subdir in "$ROOT/../readonly/"*
@@ -226,9 +233,6 @@ function ihandler() {
 
 ## MAIN ##
 
-# stores critical subv to delete to avoid corruption on INT
-CRITICAL=
-
 ROOT="${ROOT:=/run/timeshift/backup/timeshift-btrfs/snapshots}"
 SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
 
@@ -241,23 +245,30 @@ SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
 
 trap ihandler INT
 
-# searching for all kind of subvolume backups of timeshift (@ and @home but we do it in a more general manner)
-# e.g. subv = [@, @home, @var, ...]
-declare -A synced_subv
-for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "@*" -exec basename {} \;)
-do
-    # skip already iterated subvolume prefixes
-    [ -n "${synced_subv[$subv]}" ] && continue
+if [ $subv ]
+then
+    sync_subv_deletion
+    sync_subv
+else
+    # searching for all kind of subvolume backups of timeshift (@ and @home but we do it in a more general manner)
+    # e.g. subv = [@, @home, @var, ...]
+    declare -A synced_subv
+    for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "@*" -exec basename {} \;)
+    do
+        # skip already iterated subvolume prefixes
+        [ -n "${synced_subv[$subv]}" ] && continue
 
-    sync_subv_deletion $subv
-    sync_subv $subv
+        sync_subv_deletion
+        sync_subv
 
-    # to suppress multiple syncing attempts for the same prefix (@, @home...)
-    synced_subv+=([$subv]=1)
-done
+        # to suppress multiple syncing attempts for the same prefix (@, @home...)
+        synced_subv+=([$subv]=1)
+    done
+fi
 
 cleanup
 umount_dest
 
+sync
 
 #set +x
