@@ -18,7 +18,7 @@ do
 case $i in
     --help|-h)
         echo "-h, --help                        Shows this help message and exits"
-        echo "-r=<ROOT>, --root=<ROOT>          Sets root from where to backup (default: /run/timeshift/backup/timeshift-btrfs/snapshots)"
+        echo "-r=<ROOT>, --root=<ROOT>          Sets root from where to backup (default: /run/timeshift/PID/backup/timeshift-btrfs/snapshots)"
         echo "-d=<DEST>, --destination=<DEST>   Sets root wherre to save the copy of the snapshots (default: /mnt/backup-timeshift)"
         echo "-v,--verbose                      Enables verbose output"
         echo "-vb,--vbrtfs                      Enables verbose output for btrfs send/receive"
@@ -30,7 +30,7 @@ case $i in
         exit 0
         shift
         ;;
-    --root=*)
+    --root=*|-r=*)
         ROOT="${i#*=}"
         shift
         ;;
@@ -233,7 +233,7 @@ function ihandler() {
 
 ## MAIN ##
 
-ROOT="${ROOT:=/run/timeshift/backup/timeshift-btrfs/snapshots}"
+ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
 SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
 
 # check if root to sync from and sync destination exist
