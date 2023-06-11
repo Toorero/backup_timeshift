@@ -239,21 +239,28 @@ function ihandler() {
 
 
 ## MAIN ##
-# check for privileges first
-if [ "$(id -u)" -ne 0 ]; then
-        err "This utility needs to run as root to create btrfs subvolumes!"
-fi
 
-# check if root to sync from and sync destination exist
-! [ -d "$ROOT" ] && err "Folder '$ROOT' doesn't exist!"
-# try to mount sync destination
-{ ! [ -d "$SYNC_DEST" ] || [ $MOUNT ] ; } \
-    && ! { mkdir -p "$SYNC_DEST" && mount "$SYNC_DEST" && MOUNT=true && logv "Mounted '$SYNC_DEST'"; } \
-    && err "Folder '$SYNC_DEST' doesn't exist or can't be mounted!"
+# check for privileges first
+[ "$(id -u)" -ne 0 ] \
+    && err "This utility needs to run as root to create btrfs subvolumes!"
+
+
+# check if root & dest do exist
+[ -d "$ROOT" ] || err "Folder '$ROOT' doesn't exist!"
+
+# mount sync destination
+if ! [ -d "$SYNC_DEST" ] || [ $MOUNT ]  # if dest doesn't exist or forced mount
+then
+    { mkdir -p "$SYNC_DEST" && mount "$SYNC_DEST" } \
+        || err "Folder '$SYNC_DEST' doesn't exist or can't be mounted!"
+    
+    MOUNT=true                          # set mount to true if not already by forced mount
+    logv "Mounted '$SYNC_DEST'"
+fi
 
 trap "ihandler" INT HUP TERM QUIT
 
-if [ $subv ]
+if [ $subv ] # only perform backup of specific subvolume (e.g. @home)
 then
     sync_subv_deletion
     sync_subv
