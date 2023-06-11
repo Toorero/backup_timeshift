@@ -232,10 +232,10 @@ function cleanup() {
 }
 
 function ihandler() {
-    # delete snapshot if int in critical section
+    # delete snapshot if INT in critical section
     [ $CRITICAL ] && btrfs subv del "$CRITICAL"
     umount_dest
-    exit 1
+    exit 130
 }
 
 
@@ -251,7 +251,8 @@ SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
     && ! { mkdir -p "$SYNC_DEST" && mount "$SYNC_DEST" && MOUNT=true && logv "Mounted '$SYNC_DEST'"; } \
     && err "Folder '$SYNC_DEST' doesn't exist or can't be mounted!"
 
-trap ihandler INT
+trap "ihandler" INT HUP TERM QUIT
+trap
 
 if [ $subv ]
 then
@@ -276,6 +277,7 @@ fi
 
 cleanup
 umount_dest
+trap -
 
 sync
 
