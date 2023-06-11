@@ -13,11 +13,6 @@ DRY=
 SUBVOL_PATTERN="@*"
 SYNC_DEST="/mnt/backup-timeshift"
 
-err() {
-    echo "\e[1m\e[31mERROR: \e[0m$@"
-    exit 1
-}
-
 
 # --- ARGUMENT PARSING ---
 for i in "$@"
@@ -83,8 +78,8 @@ case $i in
         shift
         ;;
     *)
-        err "Unknown argument detected: \"$i\""
-        exit 1
+        echo "\e[1m\e[31mERROR: \e[0mUnknown argument detected: \"$i\""
+        exit 2
     	;;
 esac
 done
@@ -92,6 +87,11 @@ done
 ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
 
 ## HELPERS ##
+
+err() {
+    echo "\e[1m\e[31mERROR: \e[0m$@"
+    exit 1
+}
 
 indent() {
     sed 's/^/  /'
