@@ -10,6 +10,13 @@ DELETE=true
 QUIET=
 DEBUG=
 DRY=
+SUBVOL_PATTERN="@*"
+SYNC_DEST="/mnt/backup-timeshift"
+
+err() {
+    echo "\e[1m\e[31mERROR: \e[0m$@"
+    exit 1
+}
 
 
 # --- ARGUMENT PARSING ---
@@ -26,6 +33,7 @@ case $i in
         echo "--no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>"
         echo "-q,--quiet                        Supresses output to a minimum"
         echo "--subvol=@<subv>                  Only backup specified subvolume"
+        echo "--subvol-pattern=<pattern>        Only backup subvolumes matching the shell pattern (default: @*)"
         #echo "--dry-run                         Will only simulate backup process without altering any files" # WIP
         exit 0
         shift
@@ -70,15 +78,18 @@ case $i in
         subv="${i#*=}"
         shift
         ;;
+    --subvol-pattern=*)
+        SUBVOL_PATTERN="${i#*=}"
+        shift
+        ;;
     *)
-        echo "Unknown argument detected: \"$i\""
+        err "Unknown argument detected: \"$i\""
         exit 1
     	;;
 esac
 done
 
 ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
-SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
 
 ## HELPERS ##
 
@@ -99,11 +110,6 @@ logv() {
 logvv() {
     [ $VVERBOSE ] && echo "$@"
     return 0
-}
-
-err() {
-    echo "\e[1m\e[31mERROR: \e[0m$@"
-    exit 1
 }
 
 ## END HELPERS ##
@@ -265,10 +271,11 @@ then
     sync_subv_deletion
     sync_subv
 else
-    # searching for all kind of subvolume backups of timeshift (@ and @home but we do it in a more general manner)
-    # e.g. subv = [@, @home, @var, ...]
     declare -A synced_subv
-    for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "@*" -exec basename {} \;)
+    
+    # detect all subvolumes of which there are backups
+    # subv = [@, @home, @var, ...]
+    for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "$SUBVOL_PATTERN" -exec basename {} \;)
     do
         # skip already iterated subvolume prefixes
         [ -n "${synced_subv[$subv]}" ] && continue
@@ -284,7 +291,3 @@ fi
 cleanup
 umount_dest
 trap -
-
-sync
-
-#set +x
