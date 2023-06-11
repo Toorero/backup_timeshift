@@ -124,7 +124,8 @@ function umount_dest() {
     fi
 }
 
-# a snapshot is deleted if original directory by timeshift isn't present anymore
+# a snapshot is deleted if original DIRECTORY by timeshift isn't present anymore
+# WARNING: this does NOT cover partial deletion, e.g. only deleting @home but leaving @
 function snapshot_deleted() {
     ! [ -d "$ROOT/$(basename $1)" ]
 }
