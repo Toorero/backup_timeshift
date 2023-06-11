@@ -77,6 +77,8 @@ case $i in
 esac
 done
 
+ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
+SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
 
 ## HELPERS ##
 
@@ -104,10 +106,7 @@ err() {
     exit 1
 }
 
-# check for privileges first
-if [ "$(id -u)" -ne 0 ]; then
-        err "This utility needs to run as root to create btrfs subvolumes!"
-fi
+## END HELPERS ##
 
 function umount_dest() {
     if [ $MOUNT ]
@@ -240,9 +239,10 @@ function ihandler() {
 
 
 ## MAIN ##
-
-ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
-SYNC_DEST="${SYNC_DEST:=/mnt/backup-timeshift}"
+# check for privileges first
+if [ "$(id -u)" -ne 0 ]; then
+        err "This utility needs to run as root to create btrfs subvolumes!"
+fi
 
 # check if root to sync from and sync destination exist
 ! [ -d "$ROOT" ] && err "Folder '$ROOT' doesn't exist!"
