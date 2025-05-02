@@ -1,5 +1,20 @@
 #! /usr/bin/env zsh
 
+# backup-timeshift Copyright (C) 2025 Julius Rüberg
+#
+# This program is free software: you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as published
+# by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along with this program.
+# If not, see <https://www.gnu.org/licenses/>.
+
 #set -x
 # Todo: dry-run
 
@@ -19,19 +34,31 @@ for i in "$@"
 do
 case $i in
     --help|-h)
-        echo "-h, --help                        Shows this help message and exits"
-        echo "-r=<ROOT>, --root=<ROOT>          Sets root from where to backup (default: /run/timeshift/PID/backup/timeshift-btrfs/snapshots)"
-        echo "-d=<DEST>, --destination=<DEST>   Sets root wherre to save the copy of the snapshots (default: /mnt/backup-timeshift)"
-        echo "-v,--verbose                      Enables verbose output"
-        echo "-vb,--vbrtfs                      Enables verbose output for btrfs send/receive"
-        echo "--force-mount                     Forces script to mount <DEST> first"
-        echo "--no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>"
-        echo "-q,--quiet                        Supresses output to a minimum"
-        echo "--subvol=@<subv>                  Only backup specified subvolume"
-        echo "--subvol-pattern=<pattern>        Only backup subvolumes matching the shell pattern (default: @*)"
-        #echo "--dry-run                         Will only simulate backup process without altering any files" # WIP
+cat << EOF
+backup-timeshift Copyright (C) 2025 Julius Rüberg
+
+-h, --help                        Shows this help message and exits
+-r=<ROOT>, --root=<ROOT>          Sets root from where to backup (default: /run/timeshift/PID/backup/timeshift-btrfs/snapshots)
+-d=<DEST>, --destination=<DEST>   Sets root wherre to save the copy of the snapshots (default: /mnt/backup-timeshift)
+-v,--verbose                      Enables verbose output
+-vb,--vbrtfs                      Enables verbose output for btrfs send/receive
+--force-mount                     Forces script to mount <DEST> first
+--no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>
+-q,--quiet                        Supresses output to a minimum
+--subvol=@<subv>                  Only backup specified subvolume
+--subvol-pattern=<pattern>        Only backup subvolumes matching the shell pattern (default: @*)
+-l,--license                      Show the licensing terms and conditions of the program
+
+This program comes with ABSOLUTELY NO WARRANTY.
+This is free software, and you are welcome to redistribute it under certain conditions;
+type backup_timeshift -l to show the licensing terms and conditions.
+EOF
+#--dry-run                         Will only simulate backup process without altering any files" # WIP
         exit 0
-        shift
+        ;;
+    --license|-l)
+        cat COPYING
+        exit 0
         ;;
     --root=*|-r=*)
         ROOT="${i#*=}"
