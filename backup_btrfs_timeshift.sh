@@ -148,6 +148,7 @@ function backup() {
 
 function sync_subv_deletion() {
     local subdir
+    ! [ -d  "$ROOT/../readonly/" ] && return # don't sync deletion on first run
 
     [ $DELETE ] && log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
     ! [ $DELETE ] && logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only:"
