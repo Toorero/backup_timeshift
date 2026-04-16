@@ -300,6 +300,23 @@ function ihandler() {
 (( $EUID != 0 )) \
     && err "This utility needs to run as root to create btrfs subvolumes!"
 
+function require_command() {
+    local cmd=$1
+    [[ -v commands[$cmd] ]] || err "Missing '$cmd' command"
+}
+
+require_command btrfs
+require_command find
+require_command systemd-inhibit
+
+exec {inhibit_fd}> >(\
+    systemd-inhibit --why="Backup of Timeshift snapshots" \
+                    --who="backup_btrfs_timeshift" \
+                    --what=idle:sleep:handle-lid-switch:shutdown \
+                    --mode=block \
+                    cat
+)
+                
 
 # check if root & dest do exist
 [[ -d $ROOT ]] || err "Folder '$ROOT' doesn't exist!"
