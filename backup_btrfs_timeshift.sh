@@ -18,6 +18,8 @@
 #set -x
 # Todo: dry-run
 
+setopt NULL_GLOB
+
 VERBOSE=
 VVERBOSE=
 MOUNT=
