@@ -15,23 +15,24 @@
 # You should have received a copy of the GNU General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-#set -x
-# Todo: dry-run
 
-setopt NULL_GLOB
-
-VERBOSE=
-VVERBOSE=
-MOUNT=
-DELETE=true
-QUIET=
-DEBUG=
-DRY=
-SUBVOL_PATTERN="@*"
-SYNC_DEST="/mnt/backup-timeshift"
+setopt NULL_GLOB PIPE_FAIL NO_UNSET ERR_EXIT
 
 
-# --- ARGUMENT PARSING ---
+function err() {
+    echo "\e[1m\e[31mERROR: \e[0m$@"
+    exit 1
+}
+
+## ARGUMENT PARSING ##
+
+# Defaults
+_verbose=0
+_vverbose=0
+_delete=1
+_quiet=0
+_debug=0
+
 for i in "$@"
 do
 case $i in
@@ -44,7 +45,6 @@ backup-timeshift Copyright (C) 2025 Julius Rüberg
 -d=<DEST>, --destination=<DEST>   Sets root wherre to save the copy of the snapshots (default: /mnt/backup-timeshift)
 -v,--verbose                      Enables verbose output
 -vb,--vbrtfs                      Enables verbose output for btrfs send/receive
---force-mount                     Forces script to mount <DEST> first
 --no-delete                       Does not sync deletion of snapshot at <ROOT>. Does delete obsolute readonly subvolume at <ROOT>
 -q,--quiet                        Supresses output to a minimum
 --subvol=@<subv>                  Only backup specified subvolume
@@ -55,7 +55,7 @@ This program comes with ABSOLUTELY NO WARRANTY.
 This is free software, and you are welcome to redistribute it under certain conditions;
 type backup_timeshift -l to show the licensing terms and conditions.
 EOF
-#--dry-run                         Will only simulate backup process without altering any files" # WIP
+#--dry-run                         Will only simulate backup process without altering any files" # TODO
         exit 0
         ;;
     --license|-l)
@@ -71,35 +71,35 @@ EOF
         shift
         ;;
     -v|--verbose)
-        VERBOSE=true
+        _quiet=0
+        _verbose=1
         shift
         ;;
     -vb|--vbtrfs)
-        VVERBOSE=true
-        shift
-        ;;
-    --force-mount)
-        MOUNT=true
+        _quiet=0
+        _verbose=1
+        _vverbose=1
         shift
         ;;
     --no-delete)
-        DELETE=
+        _delete=0
         shift
         ;;
     -q|--quiet)
-        QUIET=true
+        _quiet=1
         shift
         ;;
-    --dry-run)
-        DRY=true
-        shift
-        ;;
+    # TODO: support dry-run
+    # --dry-run)
+    #     _dry_run=1
+    #     shift
+    #     ;;
     --debug)
-        DEBUG=true
+        _debug=1
         shift
         ;;
     --subvol=@*)
-        subv="${i#*=}"
+        _subv="${i#*=}"
         shift
         ;;
     --subvol-pattern=*)
@@ -113,81 +113,102 @@ EOF
 esac
 done
 
-ROOT="${ROOT:=/run/timeshift/$(pgrep timeshift-gtk)/backup/timeshift-btrfs/snapshots}"
+# env defaults
+if [[ ! -v ROOT ]]; then
+    readonly ts_pid=$(pgrep timeshift-gtk) \
+        || err "Can't determine timeshift root: Open timeshift-gtk or manually specify a root"
+    ROOT="/run/timeshift/$ts_pid/backup/timeshift-btrfs/snapshots"
+fi
+: "${SYNC_DEST:=/mnt/backup-timeshift}"
+: "${SUBVOL_PATTERN:=@*}"
+
+readonly verbose=$_verbose
+readonly vverbose=$_vverbose
+readonly quiet=$_quiet
+
+readonly delete=$_delete
+readonly debug=$_debug
+
 
 ## HELPERS ##
 
-err() {
-    echo "\e[1m\e[31mERROR: \e[0m$@"
-    exit 1
-}
-
-indent() {
+function indent() {
     sed 's/^/  /'
 }
 
-log() {
-    [ ! $QUIET ] && echo "$@"
-    return 0
-}
+if (( $quiet )); then
+    function log() { :; }
+else
+    function log() { echo "$*" }
+fi
 
-logv() {
-    { [ $VERBOSE ] || [ $VVERBOSE ] ; } && echo "$@"
-    return 0
-}
+if (( $verbose || $vverbose )); then
+    function logv() { echo "$*"; }
+else
+    function logv() { :; }
+fi
 
-logvv() {
-    [ $VVERBOSE ] && echo "$@"
-    return 0
-}
+if (( $vverbose )); then
+    function logvv() { echo "$*"; }
+else
+    function logvv() { :; }
+fi
 
 ## END HELPERS ##
 
 function umount_dest() {
-    if [ $MOUNT ]
-    then
-        logv "Unmount and removing created mountpoint"
-        sleep 3
-        umount "$SYNC_DEST" && rmdir "$SYNC_DEST"
-        log "Finished."
+    (( ! $mounted )) && return
+
+    logv "Unmount and removing created mountpoint"
+    sleep 3
+
+    mountpoint -q "$SYNC_DEST" || err "Not a mountpoint to unmount: '$SYNC_DEST'"
+
+    # unmount and remove the mountpoint
+    umount "$SYNC_DEST" || err "Failed to unmount '$SYNC_DEST'"
+    if (( $created_mountpoint )); then
+        rmdir "$SYNC_DEST" || err "Failed to remove the mountpoint: '$SYNC_DEST'"
     fi
 }
 
 # a snapshot is deleted if original DIRECTORY by timeshift isn't present anymore
 # WARNING: this does NOT cover partial deletion, e.g. only deleting @home but leaving @
 function snapshot_deleted() {
-    ! [ -d "$ROOT/$(basename $1)" ]
+    [[ ! -d $ROOT/$(basename $1) ]]
 }
 
 function backup_incremental() {
     CRITICAL="$3/$(basename $2)"
-    [ $DEBUG ] && set -x
+    (( $debug )) && set -x
     btrfs $(logvv "-v") send -p "$1" "$2" | btrfs $(logvv "-v") receive "$3" # todo indent output
-    [ $DEBUG ] && set +x
+    (( $debug )) && set +x
     unset CRITICAL
 }
 
 function backup() {
     CRITICAL="$2/$(basename $1)"
-    [ $DEBUG ] && set -x
+    (( $debug )) && set -x
     btrfs $(logvv "-v") send "$1" | btrfs $(logvv "-v") receive "$2" # todo indent output
-    [ $DEBUG ] && set +x
+    (( $debug )) && set +x
     unset CRITICAL
 }
 
 function sync_subv_deletion() {
     local subdir
-    ! [ -d  "$ROOT/../readonly/" ] && return # don't sync deletion on first run
+    [[ ! -d  $ROOT/../readonly/ ]] && return # don't sync deletion on first run
 
-    [ $DELETE ] && log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
-    ! [ $DELETE ] && logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only:"
+    if (( $delete )); then
+        log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
+    else
+        logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only:"
+    fi
+
     for subdir in "$ROOT/../readonly/"*
     do
-        if snapshot_deleted "$subdir" && [ -d "$subdir/$subv" ]
-        then
+        if snapshot_deleted "$subdir" && [[ -d $subdir/$subv ]]; then
             logv "Deleting $(basename $subdir)..." | indent
             btrfs subvolume delete "$subdir/$subv" | indent
-            [ $DELETE ] && btrfs subvolume delete "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" | indent
+            (( $delete )) && btrfs subvolume delete "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" | indent
         fi
     done
     log " "
@@ -203,23 +224,20 @@ function sync_subv() {
     for subdir in "$ROOT/"*
     do
         # subvol not present e.g. later enabled backup of @home
-        if ! [ -d "$subdir/$subv" ]
-        then
+        if [[ ! -d $subdir/$subv ]]; then
             logv "  Skipping since $subv not present in $subdir"
             continue
         fi
 
         local readonly_subdir="$ROOT/../readonly/$(basename $subdir)"
-        if [ -d "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" ] && [ -d "$readonly_subdir/$subv" ]
-        then
+        if [[ -d $SYNC_DEST/snapshots/$(basename $subdir)/$subv && -d $readonly_subdir/$subv ]]; then
             logv "Skipping already synced snapshot '$(basename $subdir)'" | indent
             past_subdir="$readonly_subdir"
             continue
         fi
 
         # readonly subv exists
-        if [ -d "$readonly_subdir/$subv" ]
-        then
+        if [[ -d $readonly_subdir/$subv ]]; then
             logvv "Readonly snapshot '$(basename $subdir)' already exists." | indent
         else
             logv "Creating readonly snapshot of '$(basename $subdir)'" | indent
@@ -231,15 +249,13 @@ function sync_subv() {
         fi
 
         # if readonly is synced
-        if [ -d "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" ]
-        then
+        if [[ -d $SYNC_DEST/snapshots/$(basename $subdir)/$subv ]]; then
             logvv "Readonly already synced" | indent
         else
             log "Syncing '$readonly_subdir' to '$SYNC_DEST'..." | indent
             mkdir -p "$SYNC_DEST/snapshots/$(basename $subdir)"
 
-            if [ -d "$past_subdir/$subv" ]
-            then
+            if [[ -d $past_subdir/$subv ]]; then
                 logv "Creating incremental backup of $(basename $subdir)" | indent
                 backup_incremental "$past_subdir/$subv" "$readonly_subdir/$subv" "$SYNC_DEST/snapshots/$(basename $subdir)"
             else
@@ -258,8 +274,7 @@ function cleanup() {
 
     for subdir in "$ROOT/../readonly/"*
     do
-        if snapshot_deleted "$subdir"
-        then
+        if snapshot_deleted "$subdir"; then
             logv "Deleting $(basename $subdir)" | indent
             rmdir $subdir | indent
             rmdir "$SYNC_DEST/snapshots/$(basename $subdir)" | indent
@@ -267,38 +282,63 @@ function cleanup() {
     done
 }
 
+# delete partial send snapshots, cleanup mountpoint
 function ihandler() {
-    # delete snapshot if in critical section
-    [ $CRITICAL ] && btrfs subv del "$CRITICAL"
+    log "Exiting..."
+    log
+
+    [[ -v CRITICAL ]] && btrfs subv del "$CRITICAL"
     umount_dest
-    exit 130
+
+    [[ -v 1 ]] && exit $1
 }
 
 
 ## MAIN ##
 
 # check for privileges first
-[ "$(id -u)" -ne 0 ] \
+(( $EUID != 0 )) \
     && err "This utility needs to run as root to create btrfs subvolumes!"
 
 
 # check if root & dest do exist
-[ -d "$ROOT" ] || err "Folder '$ROOT' doesn't exist!"
+[[ -d $ROOT ]] || err "Folder '$ROOT' doesn't exist!"
 
-# mount sync destination
-if ! [ -d "$SYNC_DEST" ] || [ $MOUNT ]  # if dest doesn't exist or forced mount
-then
-    { mkdir -p "$SYNC_DEST" && mount "$SYNC_DEST" } \
-        || err "Folder '$SYNC_DEST' doesn't exist or can't be mounted!"
-    
-    MOUNT=true                          # set mount to true if not already by forced mount
-    logv "Mounted '$SYNC_DEST'"
+# prohibit multiple backups to the same destination
+readonly lockfile="/var/lock/backup-timeshift-$(echo $SYNC_DEST | base64).lock"
+exec {lock_fd}>"$lockfile"
+
+if ! flock -n "$lock_fd"; then
+    err "Another instance of this script is already backing up to '$SYNC_DEST'"
 fi
 
-trap "ihandler" INT HUP TERM QUIT
+trap "ihandler" EXIT
+trap "ihandler 129" HUP
+trap "ihandler 130" INT
+trap "ihandler 130" QUIT
+trap "ihandler 130" TERM
 
-if [ $subv ] # only perform backup of specific subvolume (e.g. @home)
-then
+# mount sync destination
+if ! mountpoint -q "$SYNC_DEST"; then
+    if [[ -d $SYNC_DEST ]]; then
+        readonly created_mountpoint=0
+    else 
+        mkdir -p "$SYNC_DEST" || err "Failed to create mountpoint '$SYNC_DEST'"
+        readonly created_mountpoint=1
+    fi
+    mount "$SYNC_DEST" || err "Failed to mount '$SYNC_DEST'!"
+
+    readonly mounted=1
+    logv "Mounted '$SYNC_DEST'"
+else
+    # already mounted => no cleanup
+    readonly created_mountpoint=0
+    readonly mounted=0
+fi
+
+
+# only perform backup of specific subvolume (e.g. @home)
+if [[ -v subv ]]; then
     sync_subv_deletion
     sync_subv
 else
@@ -309,7 +349,7 @@ else
     for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "$SUBVOL_PATTERN" -exec basename {} \;)
     do
         # skip already iterated subvolume prefixes
-        [ -n "${synced_subv[$subv]}" ] && continue
+        [[ -v synced_subv[$subv] ]] && continue
 
         sync_subv_deletion
         sync_subv
@@ -320,5 +360,4 @@ else
 fi
 
 cleanup
-umount_dest
-trap -
+log "Backup finished."
