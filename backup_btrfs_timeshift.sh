@@ -17,10 +17,11 @@
 
 
 setopt NULL_GLOB PIPE_FAIL NO_UNSET ERR_EXIT
+autoload -U colors && colors
 
 
 function err() {
-    echo "\e[1m\e[31mERROR: \e[0m$@"
+    echo "$fg_bold[red]ERROR:$reset_color $@"
     exit 1
 }
 
@@ -38,7 +39,7 @@ do
 case $i in
     --help|-h)
 cat << EOF
-backup-timeshift Copyright (C) 2025 Julius Rüberg
+$fg_bold[cyan]backup-timeshift Copyright (C) 2025 Julius Rüberg$reset_color
 
 -h, --help                        Shows this help message and exits
 -r=<ROOT>, --root=<ROOT>          Sets root from where to backup (default: /run/timeshift/PID/backup/timeshift-btrfs/snapshots)
@@ -107,7 +108,7 @@ EOF
         shift
         ;;
     *)
-        echo "\e[1m\e[31mERROR: \e[0mUnknown argument detected: \"$i\""
+        echo "$fg_bold[red]ERROR:$reset_color Unknown argument detected: \"$i\""
         exit 2
     	;;
 esac
@@ -136,21 +137,21 @@ function indent() {
 }
 
 if (( $quiet )); then
-    function log() { :; }
+    function log() { if [[ -v 2 ]]; then; echo "$2"; fi; }
 else
-    function log() { echo "$*" }
+    function log() { echo "${1- }"; }
 fi
 
 if (( $verbose || $vverbose )); then
-    function logv() { echo "$*"; }
+    function logv() { echo "${1- }"; }
 else
-    function logv() { :; }
+    function logv() { if [[ -v 2 ]]; then; echo "$2"; fi; }
 fi
 
 if (( $vverbose )); then
-    function logvv() { echo "$*"; }
+    function logvv() { echo "${1- }"; }
 else
-    function logvv() { :; }
+    function logvv() { if [[ -v 2 ]]; then; echo "$2"; fi; }
 fi
 
 ## END HELPERS ##
@@ -172,25 +173,34 @@ function umount_dest() {
 
 
 function backup_incremental() {
-    CRITICAL="$3/$(basename $2)"
+    local parent_subv=$1
+    local subv=$2
+    local dest=$3
+
+    CRITICAL="$dest"
     (( $debug )) && set -x
-    btrfs $(logvv "-v") send -p "$1" "$2" | btrfs $(logvv "-v") receive "$3" # todo indent output
+    # TODO: indent output
+    btrfs $(logvv "-v" "-q") send -p "$parent_subv" "$subv" | btrfs $(logvv "-v" "-q") receive "${dest%/*}" 
     (( $debug )) && set +x
     unset CRITICAL
 }
 
 function backup() {
-    CRITICAL="$2/$(basename $1)"
+    local subv=$1
+    local dest=$2
+
+    CRITICAL="$dest"
     (( $debug )) && set -x
-    btrfs $(logvv "-v") send "$1" | btrfs $(logvv "-v") receive "$2" # todo indent output
+    # TODO: indent output
+    btrfs $(logvv "-v") send "$subv" | btrfs $(logvv "-v") receive "${dest%/*}"
     (( $debug )) && set +x
     unset CRITICAL
 }
 
 # a snapshot is deleted if original snapshot by Timeshift isn't present anymore
 function snapshot_deleted() {
-    local snapshot="${1##*/}"
-    local subv="$2"
+    local snapshot=$1
+    local subv=$2
 
     [[ ! -d $ROOT/$snapshot/$subv ]]
 }
@@ -201,12 +211,10 @@ function sync_subv_deletion() {
     local subv=$2
 
     local snapshot_path
-    for snapshot_path in "$sync_dest"*(/); do
-        if [[ ! -d $snapshot_path/$subv ]]; then
-            continue
-        fi
+    for snapshot_path in "$sync_dest"/*/"$subv"(/); do
+        local snapshot=${${snapshot_path#$sync_dest/}%/$subv}
 
-        if snapshot_deleted "$snapshot_path" "$subv"; then
+        if snapshot_deleted "$snapshot" "$subv"; then
             logv "Deleting ${snapshot_path##*/}..." | indent
             btrfs subvolume delete "$snapshot_path/$subv" | indent
 
@@ -215,55 +223,55 @@ function sync_subv_deletion() {
     done
 }
 
+# send all snapshots of $subvol to $SYNC_DEST
 function sync_subv() {
-    local subdir
-    local past_subdir
+    local subv=$1
 
-    log "$(tput bold)${subv}$(tput sgr0) Syncing timeshift backups:"
+    log "$fg_bold[cyan]$subv$reset_color Syncing timeshift backups:"
 
-    # iterate over all subdirs of $ROOT to find the $subv
-    for subdir in "$ROOT/"*(/); do
-        # subv not present e.g. later enabled backup of @home
-        if [[ ! -d $subdir/$subv ]]; then
-            logv "  Skipping since $subv not present in $subdir"
-            continue
-        fi
+    local snapshot_path
+    local past_snapshot
+    local past_readonly_snapshot_path
 
-        local readonly_subdir="$ROOT/../readonly/$(basename $subdir)"
-        if [[ -d $SYNC_DEST/snapshots/$(basename $subdir)/$subv && -d $readonly_subdir/$subv ]]; then
-            logv "Skipping already synced snapshot '$(basename $subdir)'" | indent
-            past_subdir="$readonly_subdir"
-            continue
-        fi
+    for snapshot_path in "$ROOT"/*/"$subv"(/); do
+        local snapshot=${${snapshot_path#$ROOT/}%/$subv} # usually date of the snapshot
 
-        # readonly subv exists
-        if [[ -d $readonly_subdir/$subv ]]; then
-            logvv "Readonly snapshot '$(basename $subdir)' already exists." | indent
-        else
-            logv "Creating readonly snapshot of '$(basename $subdir)'" | indent
-            mkdir -p "$readonly_subdir"
+        local readonly_snapshot_path=$ROOT/../readonly/$snapshot/$subv
+        local dest_snapshot_path=$SYNC_DEST/snapshots/$snapshot/$subv
 
-            CRITICAL="$readonly_subdir/$subv"
-            btrfs subvolume snapshot -r "$subdir/$subv" "$readonly_subdir/$subv" | indent
+        # Create readonly snapshot.
+        # This is needed since we can only send readonly snapshots.
+        if [[ ! -d $readonly_snapshot_path ]]; then
+            logv "Creating readonly snapshot of '$snapshot'" | indent
+            mkdir -p "${readonly_snapshot_path%/$subv}"
+
+            CRITICAL="$readonly_snapshot_path"
+            btrfs subvolume snapshot -r "$snapshot_path" "${readonly_snapshot_path%/$subv}" | indent
             unset CRITICAL
-        fi
-
-        # if readonly is synced
-        if [[ -d $SYNC_DEST/snapshots/$(basename $subdir)/$subv ]]; then
-            logvv "Readonly already synced" | indent
         else
-            log "Syncing '$readonly_subdir' to '$SYNC_DEST'..." | indent
-            mkdir -p "$SYNC_DEST/snapshots/$(basename $subdir)"
-
-            if [[ -d $past_subdir/$subv ]]; then
-                logv "Creating incremental backup of $(basename $subdir)" | indent
-                backup_incremental "$past_subdir/$subv" "$readonly_subdir/$subv" "$SYNC_DEST/snapshots/$(basename $subdir)"
-            else
-                backup "$readonly_subdir/$subv" "$SYNC_DEST/snapshots/$(basename $subdir)"
-            fi
+            logvv "Readonly snapshot '$snapshot' already exists." | indent
         fi
 
-        past_subdir="$readonly_subdir"
+        # Send readonly snapshot to $SYNC_DEST
+        if [[ ! -d $dest_snapshot_path ]]; then
+            mkdir -p "${dest_snapshot_path%$subv}"
+
+            if [[ -v past_readonly_snapshot_path && -d $past_readonly_snapshot_path ]]; then
+                log "Syncing '$snapshot' (incremental) ..." | indent
+                backup_incremental \
+                    "$past_readonly_snapshot_path" \
+                    "$readonly_snapshot_path" \
+                    "$dest_snapshot_path"
+            else
+                log "Syncing '$snapshot' ..." | indent
+                backup "$readonly_snapshot_path" "$dest_snapshot_path"
+            fi
+        else
+            logv "Skipping '$snapshot': Already synced" | indent
+        fi
+
+        past_snapshot=$snapshot
+        past_readonly_snapshot_path=$readonly_snapshot_path
     done
     log " "
 }
@@ -271,7 +279,7 @@ function sync_subv() {
 # delete partial send snapshots, cleanup mountpoint
 function ihandler() {
     log "Exiting..."
-    log
+    log " "
 
     [[ -v CRITICAL ]] && btrfs subv del "$CRITICAL"
     umount_dest
@@ -348,19 +356,23 @@ for snapshot_subv in ${_subv:-"$ROOT/"*/*(/)}; do
     subv=${snapshot_subv##*/}
 
     # skip already iterated subvolume prefixes
-    [[ -v synced_subv[$subv] ]] && continue
+    (( ${+synced_subv[$subv]} )) && continue
 
+    # sync deletion: readonly 
     if [[ -d  $ROOT/../readonly/ ]]; then
-        logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination:"
-        sync_subv_deletion "$ROOT/../readonly/" "$subv"
+        logv "$fg_bold[cyan]$subv$reset_color Syncing deletion of readonly backups at destination:"
+        sync_subv_deletion "$ROOT/../readonly" "$subv"
+        log " "
     fi
 
+    # sync deletion: $SYNC_DEST
     if (( $delete )); then
-        log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
-        sync_subv_deletion "$SYNC_DEST/snapshots/" "$subv"
+        log "$fg_bold[cyan]$subv$reset_color Syncing deletion of deleted timeshift backups:"
+        sync_subv_deletion "$SYNC_DEST/snapshots" "$subv"
+        log " "
     fi
 
-    sync_subv
+    sync_subv "$subv"
 
     # to suppress multiple syncing attempts for the same prefix (@, @home...)
     synced_subv+=([$subv]=1)
