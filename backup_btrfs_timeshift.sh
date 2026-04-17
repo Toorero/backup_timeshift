@@ -129,7 +129,6 @@ readonly quiet=$_quiet
 readonly delete=$_delete
 readonly debug=$_debug
 
-
 ## HELPERS ##
 
 function indent() {
@@ -171,11 +170,6 @@ function umount_dest() {
     fi
 }
 
-# a snapshot is deleted if original DIRECTORY by timeshift isn't present anymore
-# WARNING: this does NOT cover partial deletion, e.g. only deleting @home but leaving @
-function snapshot_deleted() {
-    [[ ! -d $ROOT/$(basename $1) ]]
-}
 
 function backup_incremental() {
     CRITICAL="$3/$(basename $2)"
@@ -193,25 +187,32 @@ function backup() {
     unset CRITICAL
 }
 
+# a snapshot is deleted if original snapshot by Timeshift isn't present anymore
+function snapshot_deleted() {
+    local snapshot="${1##*/}"
+    local subv="$2"
+
+    [[ ! -d $ROOT/$snapshot/$subv ]]
+}
+
+# delete all snapshot subvolumes at $sync_dest which aren't present at $ROOT
 function sync_subv_deletion() {
-    local subdir
-    [[ ! -d  $ROOT/../readonly/ ]] && return # don't sync deletion on first run
+    local sync_dest=$1
+    local subv=$2
 
-    if (( $delete )); then
-        log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
-    else
-        logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination only:"
-    fi
+    local snapshot_path
+    for snapshot_path in "$sync_dest"*(/); do
+        if [[ ! -d $snapshot_path/$subv ]]; then
+            continue
+        fi
 
-    for subdir in "$ROOT/../readonly/"*
-    do
-        if snapshot_deleted "$subdir" && [[ -d $subdir/$subv ]]; then
-            logv "Deleting $(basename $subdir)..." | indent
-            btrfs subvolume delete "$subdir/$subv" | indent
-            (( $delete )) && btrfs subvolume delete "$SYNC_DEST/snapshots/$(basename $subdir)/$subv" | indent
+        if snapshot_deleted "$snapshot_path" "$subv"; then
+            logv "Deleting ${snapshot_path##*/}..." | indent
+            btrfs subvolume delete "$snapshot_path/$subv" | indent
+
+            rmdir --ignore-fail-on-non-empty "$snapshot_path"
         fi
     done
-    log " "
 }
 
 function sync_subv() {
@@ -220,10 +221,9 @@ function sync_subv() {
 
     log "$(tput bold)${subv}$(tput sgr0) Syncing timeshift backups:"
 
-    # iterate over all subdirs of $ROOT to find the $subvol
-    for subdir in "$ROOT/"*
-    do
-        # subvol not present e.g. later enabled backup of @home
+    # iterate over all subdirs of $ROOT to find the $subv
+    for subdir in "$ROOT/"*(/); do
+        # subv not present e.g. later enabled backup of @home
         if [[ ! -d $subdir/$subv ]]; then
             logv "  Skipping since $subv not present in $subdir"
             continue
@@ -266,20 +266,6 @@ function sync_subv() {
         past_subdir="$readonly_subdir"
     done
     log " "
-}
-
-function cleanup() {
-    local subdir
-    log "Cleaning up left over directorys:"
-
-    for subdir in "$ROOT/../readonly/"*
-    do
-        if snapshot_deleted "$subdir"; then
-            logv "Deleting $(basename $subdir)" | indent
-            rmdir $subdir | indent
-            rmdir "$SYNC_DEST/snapshots/$(basename $subdir)" | indent
-        fi
-    done
 }
 
 # delete partial send snapshots, cleanup mountpoint
@@ -354,27 +340,30 @@ else
 fi
 
 
-# only perform backup of specific subvolume (e.g. @home)
-if [[ -v subv ]]; then
-    sync_subv_deletion
+declare -A synced_subv
+
+# detect all subvolumes of which there are backups
+# subv = [@, @home, @var, ...]
+for snapshot_subv in ${_subv:-"$ROOT/"*/*(/)}; do
+    subv=${snapshot_subv##*/}
+
+    # skip already iterated subvolume prefixes
+    [[ -v synced_subv[$subv] ]] && continue
+
+    if [[ -d  $ROOT/../readonly/ ]]; then
+        logv "$(tput bold)${subv}$(tput sgr0) Syncing deletion of readonly backups at destination:"
+        sync_subv_deletion "$ROOT/../readonly/" "$subv"
+    fi
+
+    if (( $delete )); then
+        log "$(tput bold)${subv}$(tput sgr0) Syncing deletion of deleted timeshift backups:"
+        sync_subv_deletion "$SYNC_DEST/snapshots/" "$subv"
+    fi
+
     sync_subv
-else
-    declare -A synced_subv
-    
-    # detect all subvolumes of which there are backups
-    # subv = [@, @home, @var, ...]
-    for subv in $(find "$ROOT" -maxdepth 2 -mindepth 2 -type d -iname "$SUBVOL_PATTERN" -exec basename {} \;)
-    do
-        # skip already iterated subvolume prefixes
-        [[ -v synced_subv[$subv] ]] && continue
 
-        sync_subv_deletion
-        sync_subv
+    # to suppress multiple syncing attempts for the same prefix (@, @home...)
+    synced_subv+=([$subv]=1)
+done
 
-        # to suppress multiple syncing attempts for the same prefix (@, @home...)
-        synced_subv+=([$subv]=1)
-    done
-fi
-
-cleanup
 log "Backup finished."
