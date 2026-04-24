@@ -242,14 +242,14 @@ function sync_subv() {
         # Create readonly snapshot.
         # This is needed since we can only send readonly snapshots.
         if [[ ! -d $readonly_snapshot_path ]]; then
-            logv "Creating readonly snapshot of '$snapshot'" | indent
+            logv "Creating readonly snapshot of $snapshot" | indent
             mkdir -p "${readonly_snapshot_path%/$subv}"
 
             CRITICAL="$readonly_snapshot_path"
             btrfs subvolume snapshot -r "$snapshot_path" "${readonly_snapshot_path%/$subv}" | indent
             unset CRITICAL
         else
-            logvv "Readonly snapshot '$snapshot' already exists." | indent
+            logvv "Readonly snapshot $snapshot already exists." | indent
         fi
 
         # Send readonly snapshot to $SYNC_DEST
@@ -257,17 +257,17 @@ function sync_subv() {
             mkdir -p "${dest_snapshot_path%$subv}"
 
             if [[ -v past_readonly_snapshot_path && -d $past_readonly_snapshot_path ]]; then
-                log "Syncing '$snapshot' (incremental) ..." | indent
+                log "Syncing $snapshot (incremental) ..." | indent
                 backup_incremental \
                     "$past_readonly_snapshot_path" \
                     "$readonly_snapshot_path" \
                     "$dest_snapshot_path"
             else
-                log "Syncing '$snapshot' ..." | indent
+                log "Syncing $snapshot ..." | indent
                 backup "$readonly_snapshot_path" "$dest_snapshot_path"
             fi
         else
-            logv "Skipping '$snapshot': Already synced" | indent
+            logv "Skipping $snapshot (already synced)" | indent
         fi
 
         past_snapshot=$snapshot
