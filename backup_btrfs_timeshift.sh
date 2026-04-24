@@ -215,10 +215,10 @@ function sync_subv_deletion() {
         local snapshot=${${snapshot_path#$sync_dest/}%/$subv}
 
         if snapshot_deleted "$snapshot" "$subv"; then
-            logv "Deleting ${snapshot_path##*/}..." | indent
-            btrfs subvolume delete "$snapshot_path/$subv" | indent
+            logv "Deleting ${snapshot}..." | indent
+            btrfs subvolume delete "$snapshot_path" | indent
 
-            rmdir --ignore-fail-on-non-empty "$snapshot_path"
+            rmdir --ignore-fail-on-non-empty "${snapshot_path%/$subv}"
         fi
     done
 }
