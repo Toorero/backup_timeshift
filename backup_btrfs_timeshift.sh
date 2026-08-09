@@ -146,7 +146,7 @@ fi
 
 if (( $_dry_run )); then
     dry_run() {
-        echo "${fg_bold[yellow]}[DRY RUN]:$reset_color" "$@"
+        echo "${fg_bold[yellow]}[DRY RUN]:$reset_color" "$@" >&2
     }
 else
     dry_run() {
