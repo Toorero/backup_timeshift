@@ -226,10 +226,10 @@ function create_readonly_snap() {
 }
 
 function backup() {
-    if (( $# == 1 )); then
+    if (( $# == 2 )); then
         local subv=$1
         local dest=$2
-        send_snap send "$subv" | receive_snap "$dest"
+        send_snap "$subv" | receive_snap "$dest"
     else
         local parent_subv=$1
         local subv=$2
